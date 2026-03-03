@@ -25,6 +25,10 @@ on:
       icon:
         description: "Icon URL, auto-fetch if empty"
         required: false
+      user-agent:
+        description: "user-agent"
+        required: false
+        default: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
       width:
         description: "Window width (px)"
         required: false
@@ -51,7 +55,7 @@ on:
       targets:
         description: "Package formats (comma-separated: deb,appimage,rpm)"
         required: false
-        default: "deb"
+        default: "dmg"
 
 jobs:
   build:
