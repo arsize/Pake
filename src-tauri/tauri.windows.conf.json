@@ -5,6 +5,7 @@
     "resources": ["png/weekly_32.ico"],
     "targets": ["msi"],
     "windows": {
+      "devtools": true,
       "digestAlgorithm": "sha256",
       "wix": {
         "language": ["en-US"],
