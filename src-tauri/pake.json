@@ -3,6 +3,7 @@
     {
       "url": "https://weekly.tw93.fun/en",
       "url_type": "web",
+      "debug": true,
       "hide_title_bar": true,
       "fullscreen": false,
       "width": 1200,
