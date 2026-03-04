@@ -1,4 +1,4 @@
-name: Build App With Pake CLI (Debug Mode)
+name: Build App With Pake CLI
 
 env:
   NODE_VERSION: "22"
@@ -10,7 +10,7 @@ on:
       platform:
         description: "Platform"
         required: true
-        default: "windows-latest"
+        default: "macos-latest"
         type: choice
         options:
           - "windows-latest"
@@ -25,10 +25,6 @@ on:
       icon:
         description: "Icon URL, auto-fetch if empty"
         required: false
-      debug:
-        description: "Enable debug mode (devtools)"
-        type: boolean
-        default: true
       width:
         description: "Window width (px)"
         required: false
@@ -55,7 +51,7 @@ on:
       targets:
         description: "Package formats (comma-separated: deb,appimage,rpm)"
         required: false
-        default: "dmg"
+        default: "deb"
 
 jobs:
   build:
@@ -97,118 +93,6 @@ jobs:
             src-tauri/target/
           key: ${{ runner.os }}-cargo-pake-${{ hashFiles('**/Cargo.lock') }}
 
-      # ========== Windows 平台特殊处理 ==========
-      - name: Force enable DevTools and fix Blob download (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Write-Host "🔧 Patching Windows build for DevTools and Blob download..." -ForegroundColor Green
-          
-          # 1. 修改 Tauri 配置强制开启开发者工具
-          $configFile = "src-tauri/tauri.conf.json"
-          if (Test-Path $configFile) {
-            $config = Get-Content $configFile -Raw | ConvertFrom-Json
-            
-            # 确保 windows 数组存在
-            if ($null -eq $config.tauri.windows -or $config.tauri.windows.Count -eq 0) {
-              Write-Host "⚠️  Windows array not found, skipping..."
-            } else {
-              # 强制开启 devtools
-              $config.tauri.windows[0].devtools = $true
-              
-              # 添加菜单以便打开 DevTools（可选）
-              if ($null -eq $config.tauri.windows[0].menu) {
-                $config.tauri.windows[0].menu = $null  # 保持默认菜单
-              }
-              
-              # 保存修改
-              $config | ConvertTo-Json -Depth 10 | Set-Content $configFile
-              Write-Host "✅ Enabled devtools in tauri.conf.json"
-            }
-          } else {
-            Write-Host "❌ tauri.conf.json not found!"
-          }
-          
-          # 2. 修改下载处理代码，添加调试日志
-          $cmdFile = "src-tauri/src/cmd.rs"
-          if (Test-Path $cmdFile) {
-            $content = Get-Content $cmdFile -Raw
-            
-            # 在 download_file_by_binary 函数中添加日志
-            if ($content -match "fn download_file_by_binary") {
-              $content = $content -replace '(fn download_file_by_binary\([^)]*\)[^{]*\{)', 
-                '$1' + "`n        println!(`"[DEBUG] download_file_by_binary called`");"
-              Set-Content $cmdFile $content
-              Write-Host "✅ Added debug logging to cmd.rs"
-            }
-          }
-          
-          # 3. 修改前端下载处理代码
-          $downloadTs = "src-tauri/src/download.rs"
-          if (Test-Path $downloadTs) {
-            $content = Get-Content $downloadTs -Raw
-            $content = $content -replace '(fn download_binary\([^)]*\)[^{]*\{)', 
-              '$1' + "`n        println!(`"[DEBUG] download_binary called with size: {}`", data.len());"
-            Set-Content $downloadTs $content
-            Write-Host "✅ Added debug logging to download.rs"
-          }
-          
-          # 4. 注入前端补丁，确保 Tauri API 正确挂载
-          $indexHtml = "src-tauri/src/index.html"
-          if (-not (Test-Path $indexHtml)) {
-            $indexHtml = "src/index.html"  # 尝试其他路径
-          }
-          
-          if (Test-Path $indexHtml) {
-            $html = Get-Content $indexHtml -Raw
-            $patchScript = @"
-<script>
-  // Pake Blob Download Fix
-  (function() {
-    console.log('[Pake] Applying Blob download fix...');
-    
-    // 确保 Tauri API 可用
-    window.__TAURI__ = window.__TAURI__ || {};
-    
-    // 补丁：如果 invoke 不存在，尝试从全局获取
-    if (!window.__TAURI__.invoke && window.__TAURI_IPC__) {
-      window.__TAURI__.invoke = function(cmd, args) {
-        return window.__TAURI_IPC__.send(cmd, args);
-      };
-      console.log('[Pake] Patched invoke function');
-    }
-    
-    // 监控 Blob 下载
-    const originalCreateObjectURL = URL.createObjectURL;
-    URL.createObjectURL = function(blob) {
-      console.log('[Pake] createObjectURL called', blob);
-      return originalCreateObjectURL.call(this, blob);
-    };
-    
-    console.log('[Pake] Blob download fix applied, Tauri API:', !!window.__TAURI__?.invoke);
-  })();
-</script>
-"@
-            
-            # 在 </head> 前插入补丁
-            $html = $html -replace '</head>', "$patchScript`n</head>"
-            Set-Content $indexHtml $html
-            Write-Host "✅ Injected Blob download fix into HTML"
-          }
-          
-          # 5. 修改 CLI 参数处理，强制添加调试标志
-          $cliFile = "src/cli.ts"
-          if (Test-Path $cliFile) {
-            $content = Get-Content $cliFile -Raw
-            # 找到处理 debug 参数的地方
-            $content = $content -replace 'const debug = .+;', 'const debug = true; // Force enabled by GitHub Actions'
-            $content = $content -replace 'devtools: .+,', 'devtools: true,'
-            Set-Content $cliFile $content
-            Write-Host "✅ Forced debug mode in CLI"
-          }
-          
-          Write-Host "🎉 Windows patch complete! DevTools enabled and Blob download fixed." -ForegroundColor Green
-
       - name: Build App (Linux/macOS)
         if: runner.os != 'Windows'
         timeout-minutes: 25
@@ -240,10 +124,6 @@ jobs:
             ARGS+=("--multi-arch")
           fi
 
-          if [ "${{ inputs.debug }}" == "true" ]; then
-            ARGS+=("--debug")
-          fi
-
           if [ -n "${{ inputs.targets }}" ] && [ "${{ runner.os }}" == "Linux" ]; then
             ARGS+=("--targets" "${{ inputs.targets }}")
           fi
@@ -256,11 +136,7 @@ jobs:
         timeout-minutes: 25
         shell: pwsh
         run: |
-          $args = @(
-            "${{ inputs.url }}"
-            "--name"
-            "${{ inputs.name }}"
-          )
+          $args = "${{ inputs.url }}", "--name", "${{ inputs.name }}"
 
           if ("${{ inputs.icon }}" -ne "") {
             $args += "--icon", "${{ inputs.icon }}"
@@ -282,18 +158,9 @@ jobs:
             $args += "--hide-title-bar"
           }
 
-          # 调试模式已经通过源码强制开启，所以这里不传 --debug 也可以
-          # 但如果想传递也可以加上
-          if ("${{ inputs.debug }}" -eq "true") {
-            $args += "--debug"
-          }
-
-          Write-Host "🚀 Running: node dist/cli.js $($args -join ' ')" -ForegroundColor Yellow
-          
-          # 执行构建
+          Write-Host "Running: node dist/cli.js $($args -join ' ')"
           node dist/cli.js $args
-          
-          # 恢复 Cargo.lock
+
           git checkout -- src-tauri/Cargo.lock
 
       - name: Upload DMG (macOS)
@@ -329,15 +196,6 @@ jobs:
           name: ${{ inputs.name }}-Windows
           path: ${{ inputs.name }}.msi
           retention-days: 3
-
-      - name: Upload NSIS (Windows, if exists)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v6
-        with:
-          name: ${{ inputs.name }}-Windows-NSIS
-          path: ${{ inputs.name }}.exe
-          retention-days: 3
-          if-no-files-found: ignore
 
       - name: Rust cache store
         uses: actions/cache/save@v4.2.0
